@@ -9,23 +9,19 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import math
-import cv2
+# import cv2
 import matplotlib.pyplot as plt
 
 class LOG():
     def __init__(self, dir):
         # 创建一个logger
         self.logger = logging.getLogger('MyLogger')
-        self.logger.setLevel(logging.DEBUG)
+        self.logger.setLevel(logging.INFO)
         # logging.getLogger('tensorflow').disabled = True
         # 创建一个handler，用于写入日志文件
         fh = logging.FileHandler(
             os.path.join(dir, 'log.log'), encoding='utf-8')
         fh.setLevel(logging.INFO)
-
-        # 再创建一个handler，用于输出到控制台
-        ch = logging.StreamHandler()
-        ch.setLevel(logging.DEBUG)
 
         # 定义handler的输出格式
         # formatter = logging.Formatter('[%(asctime)s][%(thread)d][%(filename)s][line: %(lineno)d][%(levelname)s] # %(message)s')
@@ -35,7 +31,6 @@ class LOG():
 
         # 给logger添加handler
         self.logger.addHandler(fh)
-        self.logger.addHandler(ch)
 
         # 记录一条日志
         self.logger.info('-----------------------------------------------------------')
@@ -60,23 +55,23 @@ class TwoCropTransform:
     def __call__(self, x):
         return [self.transform(x), self.transform(x)]
 
-class Distances_Metric(nn.Module):
-    """
-    A distance measurement network
-    """
-    def __init__(self, input_dim):
-        '''
-        构造函数
-        input_dim: 输入向量的维度
-        '''
-        super(Distances_Metric, self).__init__()
-        self.cal_layer = nn.Linear(input_dim, 2)
+# class Distances_Metric(nn.Module):
+#     """
+#     A distance measurement network
+#     """
+#     def __init__(self, input_dim):
+#         '''
+#         构造函数
+#         input_dim: 输入向量的维度
+#         '''
+#         super(Distances_Metric, self).__init__()
+#         self.cal_layer = nn.Linear(input_dim, 2)
         
-    def forward(self, x1, x2):
-        x = torch.cat((x1, x2), 0)
-        x = self.cal_layer(x1)
-        score = F.log_softmax(x, dim=-1)
-        return score
+#     def forward(self, x1, x2):
+#         x = torch.cat((x1, x2), 0)
+#         x = self.cal_layer(x1)
+#         score = F.log_softmax(x, dim=-1)
+#         return score
 
 def accuracy(output, target, topk=(1,)):
     '''Compute the accuracy over the k top predictions for the specified values of k'''
@@ -276,30 +271,36 @@ def cos_calc_eer(distances, label, log_path, epoch, best_thres = None):
     eer = 1
     ones = torch.ones(label.shape).type(torch.LongTensor).cuda() #全1变量
     zeros = torch.zeros(label.shape).type(torch.LongTensor).cuda()  # 全0变量
-    file_path = log_path + '/' + 'cos_roc{}.txt'.format(epoch)
-    fd = open(file_path, 'w+')
+    is_test = False
     if best_thres == None:
         threshold_list = np.linspace(0, 1, num=100)
     else:
         threshold_list = []
         threshold_list.append(best_thres)
+        is_test = True
+    if not is_test:
+        file_path = log_path + '/' + 'cos_roc{}.txt'.format(epoch)
+        fd = open(file_path, 'w+')
     for threshold in threshold_list:
         pred = torch.gt(distances, threshold).cuda()
         # 获取TP,TN,FP,FN
         tp = ((label == ones) & (pred==ones)).sum().type(torch.FloatTensor).cuda()     # 实际标签为1(正例)且预测标签为1的数量    预测正确
-        fp = ((label == zeros) & (pred == ones)).sum().type(torch.FloatTensor).cuda()  # 实际标签为1(正例)且预测标签为0的数量
-        fn = ((label == ones) & (pred == zeros)).sum().type(torch.FloatTensor).cuda()  # 实际标签为0(负例)且预测标签为1的数量
+        fp = ((label == zeros) & (pred == ones)).sum().type(torch.FloatTensor).cuda()  # 实际标签为0(负例)且预测标签为1的数量
+        fn = ((label == ones) & (pred == zeros)).sum().type(torch.FloatTensor).cuda()  # 实际标签为1(正例)且预测标签为0的数量
         tn = ((label == zeros) & (pred == zeros)).sum().type(torch.FloatTensor).cuda() # 实际标签为0(负例)且预测标签为0的数量    预测正确
-        fr = fn / (fn + tn)
-        fa = fp / (fp + tp)
+        fr = fn / (fn + tp)
+        fa = fp / (fp + tn)
 
         print('fr {:.6f}, fa {:.6f}, thr {:.6f}'.format(fr, fa, threshold))
-        fd.write('{:.6f},{:.6f},{:.6f}\n'.format(fr, fa, threshold))
+        if not is_test:#验证集才写匹配情况
+            fd.write('{:.6f}, {:.6f}, {:.6f}\n'.format(fr, fa, threshold))
+            fd.write('tp{}, fp{}, fn{}, tn{}\n'.format(tp, fp, fn, tn))
         if abs(fr - fa) < minV:
             minV = abs(fr - fa)
             eer = (fr + fa) / 2
             bestThresh = threshold
-    fd.close()
+    if not is_test:
+        fd.close()
     return eer, bestThresh, minV
 
 # L2距离计算1表示同类，0表示异类
@@ -395,8 +396,8 @@ def draw_roc(file_path):
             t = float(i[:-1].split(',')[2])
             scores.append([t, fa, fr])
     scores = np.array(scores)
-    plt.plot(scores[:, 0], scores[:, 1], label='fa')
-    plt.plot(scores[:, 0], scores[:, 2], label='fr')
+    plt.plot(scores[:, 0], scores[:, 1], label='fa', color='#ff0000')
+    plt.plot(scores[:, 0], scores[:, 2], label='fr', color='#00ff00')
     plt.legend(loc='center right')
     # plt.show()
     plt.savefig(file_path[:-14]+'roc')
@@ -413,6 +414,6 @@ if __name__ == '__main__':
     # x = torch.cat((x1, x2), 0)
     # for i in range(30):
     #     x = np.random.choice(a=[0,1], size=6, replace=True, p=None)
-    #     print(x[0])
-    # draw_roc('./log/mobilenetV2_target_padding_20210328-0818_contrastive_lr0.025_batchsize128/cos_roc185.txt')
-    gather_pic()
+        # print(x[0])
+    draw_roc('./log/mobilenetV2_Undergraduate_2020_20210511-1341_contrastive_lr0.00125_batchsize32/cos_roc200.txt')
+    # gather_pic()

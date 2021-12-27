@@ -16,11 +16,31 @@ model_zoo = {
     'Res18': 'Resnet18',
     'Res50': 'Resnet50',
 }
+#数据集名称
 dataset_zoo = {
-    'DR2P': 'dataBase_roi_2_padding1',
-    'TP': 'target_padding',
+    'Un2020': 'Undergraduate_2020',
+    'SCUTV2': 'SCUT_PPPV_V2_PV',
+    # 'TP': 'target_padding',
+    'TJ': 'Tongji',
+    'PolyMS': 'PolyU_MS',
+    'CA_460': 'CASIA_460',
+    'CA_850': 'CASIA_850',
+    'PUT': 'PUT_PV',
+    'vera': 'VERA_PV',
     'c10': 'cifar10',
     'c100': 'cifar100',
+}
+#数据集路径
+datadir_zoo = {
+    'TJPV': "/home/data/palm/Tongji_Contactless_Palmvein/ROI_outer",
+    'TJPP': "/home/data/palm/Tongji_Contactless_Palmprint/ROI_outer",
+    'PolyPP': "/home/data/palm/PolyU2011/PolyU_2011_palmprints_Database/Blue",
+    'PolyPV': "/home/data/palm/PolyU2011/PolyU_2011_palmprints_Database/NIR",
+    'CASIA': "/home/data/palm/CASIA-Multi-Spectral-PalmprintV1/outer_roi",
+    'Un2020': "/home/data/palm/Undergraduate_2020/ROI_outer",
+    'SCUTV2': '/home/data/palm/SCUT_PPPV_V2/roi_outer',
+    'PUT': '/home/data/palm/PUT_Vein/VPBase_corrected/Palm',
+    'vera': '/home/data/palm/idiap/idiap/vera-palmvein/VERA-Palmvein/roi',
 }
 
 def get_args():
@@ -29,13 +49,13 @@ def get_args():
     """
     parser = argparse.ArgumentParser(description='PyTorch Training Params')
     # 传入训练epochs数、metavar只用于help打印帮助信息时起占位符作用
-    parser.add_argument('--epochs', default=400, type=int, metavar='N',
+    parser.add_argument('--epochs', default=150, type=int, metavar='N',
                         help='number of total epochs to run')
     # 设置输入图片尺寸
     parser.add_argument('--img_size', default=(224,224),metavar='(a,b)',
                         help='the size of input image')
     # 指定使用的gpu编号
-    parser.add_argument('--gpu', default='2', metavar='0',
+    parser.add_argument('--gpu', default='1', metavar='0',
                         help='the id of gpu')
     # 是否使用多卡训练
     parser.add_argument('--distributed', default=False, type=bool, metavar="True or False",
@@ -53,32 +73,35 @@ def get_args():
     parser.add_argument('--save_freq', default=50, type=int, metavar='N',
                         help='test freq')
     # batch-size大小
-    parser.add_argument('-b', '--batch_size', default=128, type=int,
+    parser.add_argument('-b', '--batch_size', default=32, type=int,
                         metavar='N',
                         help='mini-batch size (default: 256), this is the total '
                             'batch size of all GPUs on the current node when '
                             'using Data Parallel or Distributed Data Parallel')
     # 设置学习率
-    parser.add_argument('--lr', '--learning_rate', default=.1, type=float,
+    parser.add_argument('--lr', '--learning_rate', default=0.02, type=float, #.01 .02
                         metavar='LR', help='initial learning rate', dest='lr')
+    # 梯度截断
+    parser.add_argument('--clip', default=10, type=float,
+                        help='gradient clip')
     # 设置warmup
     parser.add_argument('--warm', default=False, type=bool,
                         help='warm-up for large batch training')
     parser.add_argument('--base_lr', '--base_learning_rate', default=0.0001, type=float,
                         metavar='baseLR', help='initial learning rate')
-    parser.add_argument('--warm_epochs', default=0, type=int,
+    parser.add_argument('--warm_epochs', default=20, type=int,
                         metavar='warmup_epoch', help='Number of Warmup Epochs During Contrastive Training.')
     # 数据集路径
-    parser.add_argument('--data_dir', default="/home/data/palm/ScutPalm_padding/"+dataset_zoo['DR2P'], 
+    parser.add_argument('--data_dir', default=datadir_zoo['CASIA'], 
                         type=str, metavar='dir', help='the path of src files')
-    parser.add_argument('--data_folder', default="/home/data/"+dataset_zoo['c10'], 
-                        type=str, metavar='dir', help='the path of src files')
+    # parser.add_argument('--data_folder', default="/home/data/"+dataset_zoo['c10'], 
+    #                     type=str, metavar='dir', help='the path of src files')
     # cos学习率衰减策略或指数衰减
     parser.add_argument('--cos', default=True, type=bool,
                         metavar='Ture', help='use cos learning rate')
     # 数据集名称
-    parser.add_argument('--dataset', default=dataset_zoo['DR2P'], type=str,
-                        metavar='name', help='the name of dataset') 
+    parser.add_argument('--dataset', default=dataset_zoo['CA_850'], type=str,
+                        metavar='name', help='the name of dataset')
     # 是否使用数据扩增
     parser.add_argument('--aug', default=True, type=bool,
                         metavar='True/False', help='Use data augment or not.True or False')
@@ -104,15 +127,22 @@ def get_args():
     parser.add_argument('--blur_sigma', nargs=2, type=float, default=[0.1, 1.0],
                     help='Radius to Apply Random Colour Jitter Augmentation')
     # NCE loss的困难样本权重
-    parser.add_argument('--beta', default=2., type=float, metavar='beta',
-                        help='focal beta')
+    parser.add_argument('--focal', action='store_true',
+                        help='set whether to use focal')
+    parser.add_argument('--gamma', default=0.5, type=float, metavar='gamma',
+                        help='focal gamma')
+    parser.add_argument('--keep_w', default=.1, type=float, metavar='keep_weight',
+                        help='focal keep weight')
+    # 随机种子
+    parser.add_argument('--seed', default=44, type=int, metavar='seed',
+                        help='random seed')
 
-    args =  parser.parse_args()
+    args = parser.parse_args()
     # if args.batch_size > 256:
     args.warm = True
     if args.warm:
-        args.warmup_from = .001
-        args.warm_epochs = 10
+        args.warmup_from = .0005
+        # args.warm_epochs = 30
         # if args.cos:
         #     eta_min = args.lr * (args.lr_decay_rate ** 3)
         #     args.warmup_to = eta_min + (args.lr - eta_min) * (

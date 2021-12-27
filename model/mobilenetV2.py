@@ -1,16 +1,19 @@
 #!/usr/bin/env python
 # coding:utf-8
 import os, sys
-from math import floor
-path = os.path.dirname(os.path.dirname(__file__))
+from math import floor, log
+# path = os.path.dirname(os.path.dirname(__file__))
 # print(path)
-sys.path.append(path)
+sys.path.append('..')
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from efficientnet_pytorch import EfficientNet
-from torchsummary import summary
+# from efficientnet_pytorch import EfficientNet
+# from torchsummary import summary
+from params import get_args
+from loss.arcface import ArcMarginProduct,AddMarginProduct,SphereProduct
+from loss.CurricularFace import CurricularFace
 # from ResNet import *
 # from .ResNet import ResNet18
 
@@ -163,6 +166,25 @@ class MobileNet_v2(nn.Module):
         self.feature_map3 = None
         self.feature = None
         self.in_channel = in_channel
+        latent_num = 512 #隐藏层特征维度
+        metric = ''
+        self.metric = metric
+        print(f'model metric: {metric}')
+        # 选择度量方法
+        # cosface
+        if metric == 'add_margin':
+            self.cls_fc = AddMarginProduct(latent_num, num_classes, s=30, m=0.35)
+        # arcface
+        elif metric == 'arc_margin':
+            self.cls_fc = ArcMarginProduct(latent_num, num_classes, s=30, m=0.5, easy_margin=True)
+        # sphereface
+        elif metric == 'sphere':
+            self.cls_fc = SphereProduct(latent_num, num_classes, m=4)
+        elif metric == 'CurricularFace':
+            self.cls_fc = CurricularFace(latent_num, num_classes)
+        # 普通的全连接层
+        else:
+            self.cls_fc = nn.Linear(latent_num, num_classes)
 
         self.conv_bn_3_32 = conv_bn(in_channel, 32, 2)
         self.max_pool = nn.MaxPool2d(kernel_size=2, ceil_mode=True)
@@ -178,8 +200,8 @@ class MobileNet_v2(nn.Module):
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
         # self.drop_out = nn.Dropout(0.5)
 
-        self.fc_256_classes = nn.Linear(256, self.num_classes)
-        self.fc_512_classes = nn.Linear(512, self.num_classes)
+        # self.fc_256_classes = nn.Linear(256, self.num_classes)
+        # self.fc_512_classes = nn.Linear(512, self.num_classes)
 
         # initialize model parameters
         for m in self.modules():
@@ -191,7 +213,7 @@ class MobileNet_v2(nn.Module):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
 
-    def forward(self, x):
+    def forward(self, x, label):
         '''
         forward function
         '''
@@ -220,14 +242,19 @@ class MobileNet_v2(nn.Module):
         x = x.view(-1, 512)
         self.feature = x
         x = self.drop_out(x)
-        x = self.fc_512_classes(x)
+        # x = self.fc_512_classes(x)
+        if self.metric:
+            logit = self.cls_fc(x, label)
+        else:
+            logit = self.cls_fc(x)
 
         # x = F.softmax(x, dim=0)
-        return x, self.feature
+        return logit, self.feature
 
 
 if __name__ == '__main__':
-    os.environ['CUDA_VISIBLE_DEVICES'] = '3'
+    args = get_args()
+    os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
     net = MobileNet_v2(num_classes=107, in_channel=1).cuda()
     # import os
     # net = EfficientNet.from_name('efficientnet-b7', include_top=False, in_channels=1).cuda()
