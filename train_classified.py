@@ -16,6 +16,7 @@ import torchvision.transforms as transforms
 from torch.utils.tensorboard import SummaryWriter
 import model.mobilenetV2 as mobilenetV2
 import model.attention_mobilenetV2 as attention_mobilenetV2
+# from model.mobilenetv2_m import MobileNetV2m_arccenter
 from data_process.datasets import FVDataset
 from loss.center_loss import CenterLoss
 from utils import AverageMeter, LOG
@@ -45,7 +46,9 @@ def SetSeed(seed=0):
 # 主流程
 def main():
     args = params.get_args()
-    time_now = time.strftime("%Y%m%d-%H%M", time.localtime())
+    args.lr = 0.16 * args.batch_size / 256 #simsiam的做法
+    args.warmup_to = args.lr
+    time_now = time.strftime("%Y%m%d-%H%M%S", time.localtime())
     log_path =args.log_dir + '/'+ args.model + '_' + args.dataset + '_' + time_now + "_classified_lr" + str(args.lr) + "_batchsize" + str(args.batch_size)
     mkdir(log_path)
     logger = LOG(log_path)
@@ -57,7 +60,7 @@ def main():
     mkdir('./ckpt')
     mkdir(args.log_dir)
     # logger.info('gamma :{} keep_wei:{} '.format(args.gamma, args.keep_w))
-
+    logger.info(f'学习率cos衰减 : {args.cos}'.center(40, '-'))
     #是否需要进行随机数据扩增
     train_augmentation = None
     test_augmentation = None
@@ -86,24 +89,24 @@ def main():
         random_resizecrop = transforms.RandomResizedCrop(args.img_size, scale=(0.9, 1.), ratio=(1., 1.))
         train_augmentation = [
             random_resizecrop,
-            # transforms.RandomApply([
-            #     transforms.ColorJitter(0.3, 0.3, 0.3, 0.2),
-            #     transforms.RandomPerspective(distortion_scale=0.05, p=0.5),
-            #     transforms.RandomAffine(degrees=5, translate=(0.001, 0.005)),
-            # ], p=0.7),
-            transforms.RandomApply([transforms.RandomAffine(degrees=8, translate=(0.01, 0.01), scale=(0.9, 1))], p=1),
-            transforms.RandomPerspective(distortion_scale=0.1, p=1),
-            transforms.RandomApply([transforms.ColorJitter(0.5, 0.5, 0.5, 0.2)], p=1),
+            transforms.RandomApply([
+                transforms.ColorJitter(0.3, 0.3, 0.3, 0.2),
+                transforms.RandomPerspective(distortion_scale=0.1, p=0.8),
+                transforms.RandomAffine(degrees=8, translate=(0.01, 0.01), scale=(0.9, 1)),
+            ], p=0.8),
+            # transforms.RandomApply([transforms.RandomAffine(degrees=8, translate=(0.01, 0.01), scale=(0.9, 1))], p=1),
+            # transforms.RandomPerspective(distortion_scale=0.1, p=1),
+            # transforms.RandomApply([transforms.ColorJitter(0.5, 0.5, 0.5, 0.2)], p=1),
             # transforms.RandomRotation(5),     # 随机旋转
             transforms.ToTensor(),
-            # normalize,
+            normalize,
             # transforms.Normalize(mean=[0.5, 0.5, 0.5], 
             #                      std=[0.5, 0.5, 0.5]) 
         ]
 
         test_augmentation = [
             transforms.ToTensor(),
-            # normalize,
+            normalize,
             # transforms.Normalize(mean=[0.5, 0.5, 0.5], 
             #                         std=[0.5, 0.5, 0.5]) 
         ]
@@ -116,11 +119,14 @@ def main():
     
     # 训练使用的模型
     if args.model == 'mobilenetV2':
-        model = mobilenetV2.MobileNet_v2(num_classes=train_dataset.num_class, in_channel=1)
+        model = mobilenetV2.MobileNet_v2(args, num_classes=train_dataset.num_class, in_channel=1)
     elif args.model == 'attention_mobileNetV2':
         model = attention_mobilenetV2.TestNet()
     elif args.model == 'TestNet':
         model = mobilenetV2.TestNet()
+    # elif args.model == 'MobileNetV2m_arccenter':
+    #     model = MobileNetV2m_arccenter(num_classes=train_dataset.num_class)
+    logger.info(f'model fc layer: {model.metric}'.center(40, '-'))
 
     # # 如果使用分布式训练，进行分布式采样
     # if args.distributed:
@@ -225,9 +231,9 @@ def main():
 
         # 使用迭代器创建tqdm进度条
         tqdm_batch = tqdm(train_loader, desc='INFO:Mytqdm  :Training Epoch: ' + str(epoch).center(20, '-'))
-        # cross_entropy_loss_tracker = AverageMeter('crossEntropy', ':.4e')
-        # center_loss_tracker = AverageMeter('centerLoss', ':.4e')
-        loss_tracker = AverageMeter('loss', ':.4e')
+        classify_tracker = AverageMeter('classify_loss', ':.4e')
+        center_tracker = AverageMeter('Center_Loss', ':.4e')
+        Loss_tracker = AverageMeter('Total Loss', ':.4e')
         
         # switch to train mode
         model.train()
@@ -239,8 +245,11 @@ def main():
             label = label.cuda()
             optimizer.zero_grad()
             # compute output
-            output, feature = model(image, label)
-            loss = criterion_ClassifyLoss(output, label)
+            # feature1, out1, LossCent1, LossTri1 = model(image, label)
+            out1, feature = model(image, label)
+            loss1 = criterion_ClassifyLoss(out1, label)
+            # loss = loss1 + 0.1*LossCent1
+            loss = loss1
 
             if epoch <= args.warm_epochs:
                 warmup_learning_rate(args, epoch, i, len(train_loader), optimizer)
@@ -248,18 +257,21 @@ def main():
             loss.backward()
             optimizer.step()
             # optimizer_centerloss.step()
-            loss_tracker.update(loss.item(), label.size(0))
+            classify_tracker.update(loss1.item(), label.size(0))
+            # center_tracker.update(LossCent1.item(), label.size(0))
+            Loss_tracker.update(loss.item(), label.size(0))
             
         tqdm_batch.close()
-        # logger.info("-----Loss: ({:.6f}) -------CenterLoss:  ({:.6f}) ---CrossEntropy: ({:.6f}) "\
-        #              .format(loss_tracker.avg, center_loss_tracker.avg, cross_entropy_loss_tracker.avg))
-        logger.info("---CrossEntropy:({:.6f}) ".format(loss_tracker.avg))
-        # 写进tensorboard
-        writer.add_scalar('Loss', loss_tracker.avg, epoch)
-        # writer.add_scalar('CenterLoss', center_loss_tracker.avg, epoch)
-        # writer.add_scalar('SoftmaxLoss', cross_entropy_loss_tracker.avg, epoch)
-        writer.add_scalar('Lr', optimizer.param_groups[0]['lr'], epoch)
+        # logger.info("-----{}: ({:.6f})".format(Nce_tracker.name,Nce_tracker.avg))
+        # logger.info("-----{}: ({:.6f})".format(center_tracker.name,center_tracker.avg))
+        logger.info("-----{}: ({:.6f})".format(Loss_tracker.name,Loss_tracker.avg))
+        logger.info(("-----{}: ({:.4f})".format(classify_tracker.name, classify_tracker.avg)))
         logger.info('-------Lr:{:.6f}------'.format(optimizer.param_groups[0]['lr']))
+        # writer.add_scalar(f'{t_tracker.name}', t_tracker.avg, epoch)
+        writer.add_scalar(f'{classify_tracker.name}', classify_tracker.avg, epoch)
+        # writer.add_scalar(f'{center_tracker.name}', center_tracker.avg, epoch)
+        writer.add_scalar(f'{Loss_tracker.name}', Loss_tracker.avg, epoch)
+        writer.add_scalar('Lr', optimizer.param_groups[0]['lr'], epoch)
 
         # 使用测试集测试
         if (30 < epoch < args.epochs - 40 and epoch % args.test_freq == 0) or (epoch >= args.epochs - 40 and epoch % 5 == 0): 
@@ -284,6 +296,8 @@ def main():
                     label = label.cuda()
                     _, feature1 = model(image1, label)
                     _, feature2 = model(image2, label)
+                    # feature1, _, _, _ = model(image1, label)
+                    # feature2, _, _, _ = model(image2, label)
                     # feature1 = model(image1)
                     # feature2 = model(image2)
                     # feature1 = feature1.view(-1, 1280)
@@ -349,6 +363,8 @@ def main():
                         label = label.cuda()
                         _, feature1 = model(image1, label)
                         _, feature2 = model(image2, label)
+                        # feature1, _, _, _ = model(image1, label)
+                        # feature2, _, _, _ = model(image2, label)
                         # feature1 = model(image1)
                         # feature2 = model(image2)
                         # feature1 = feature1.view(-1, 1280)

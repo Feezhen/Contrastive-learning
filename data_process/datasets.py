@@ -55,7 +55,7 @@ class FVDataset(torch.utils.data.Dataset):
             self.test_df = df
         else:
             colname = ['sample1', 'label']
-            data_csv_path = os.path.join(test_csv_dir, '{}_visualize_test.csv'.format(self.args.dataset))
+            data_csv_path = os.path.join(test_csv_dir, '{}_sample_test.csv'.format(self.args.dataset))
             df = pd.read_csv(data_csv_path, names=colname)
             self.test_df = df
         
@@ -79,11 +79,15 @@ class FVDataset(torch.utils.data.Dataset):
                 sample1_path = os.path.join(self.args.data_dir, sample1)
                 # else:
                 #     sample1_path = os.path.join(self.args.data_dir+'_weaken', sample1)
-                img = Image.open(sample1_path).convert('L')
-                img = img.resize(self.args.img_size, Image.ANTIALIAS)
+                sample1_img = Image.open(sample1_path).convert('L')
+                sample1_img = sample1_img.resize(self.args.img_size, Image.ANTIALIAS)
                 # img.show()
                 if self.transform_fcn is not None:
-                    img = self.transform_fcn(img)
+                    img = self.transform_fcn(sample1_img)
+                    hist = torch.histc(img, bins=4, min=-1., max=1.)
+                    while hist[3] > self.args.img_size[0]*self.args.img_size[1] / 8:
+                        img = self.transform_fcn(sample1_img)
+                        hist = torch.histc(img, bins=4, min=-1., max=1.)
                 return img, label
             else:
                 # 使用对比方法训练
@@ -116,9 +120,9 @@ class FVDataset(torch.utils.data.Dataset):
                     while hist[3] > self.args.img_size[0]*self.args.img_size[1] / 8:
                         img2 = self.transform_fcn(sample2_img)
                         hist = torch.histc(img2, bins=4, min=-1., max=1.)
-                    sample_path = 'pic/'
-                    self.saveImg(img1, sample_path+'/'+os.path.split(sample1)[1], Gray=True)
-                    self.saveImg(img2, sample_path+'/'+os.path.split(sample2)[1], Gray=True)
+                    # sample_path = 'pic/'
+                    # self.saveImg(img1, sample_path+'/'+os.path.split(sample1)[1], Gray=True)
+                    # self.saveImg(img2, sample_path+'/'+os.path.split(sample2)[1], Gray=True)
 
                 return img1, img2, label
         else:

@@ -3,12 +3,13 @@
 import os
 import csv
 import math
-from typing import get_args
 from cv2 import data
 import numpy as np
 from torch.nn.modules.module import T
 from torch.serialization import save
-from torch.utils.tensorboard import writer
+# from torch.utils.tensorboard import writer
+import sys
+sys.path.append('../')
 import params
 import pandas as pd
 from tqdm import tqdm
@@ -321,7 +322,7 @@ def create_contrastive_data_csv3(data_path, t=6, test_mode='open', test_ratio=0.
     sub = int(len(data_list) / t)
     file_name = dataset_name + '_contrastive523.csv'
     pwd = os.getcwd()
-    save_path = os.path.join(os.path.join(pwd, 'csv'), file_name)
+    save_path = os.path.join(os.path.join(pwd, '../csv'), file_name)
     fd = open(save_path, 'w', encoding='utf-8')
     headers = ['group', 'sample1', 'sample2', 'label']
     writer = csv.DictWriter(fd, headers)
@@ -388,7 +389,7 @@ def get_trainset(path):
 if __name__ == "__main__":
     args = params.get_args()
     # divide_data2(args.data_dir, t=30, test_mode='open', test_ratio=0.3, dataset_name=args.dataset, view_total=1, view=1)
-    create_contrastive_data_csv3(args.data_dir, t=10, test_mode='open', test_ratio=0.3, dataset_name=args.dataset, view_total=1, view=1)
+    create_contrastive_data_csv3(args.data_dir, t=30, test_mode='open', test_ratio=0.3, dataset_name=args.dataset, view_total=1, view=1)
     # create_classified_data_csv(args.data_dir, t=6, test_mode='open', test_ratio=0.2, dataset_name=args.dataset, view_total=1, view=1)
     # data_list = os.listdir("/home/data/dataBase_temp_gqc")
     # print(data_list)

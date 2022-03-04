@@ -1,0 +1,6 @@
+全连接层设置
+python train_classified.py --seed 44 --batch_size 128 --gpu 0
+python train_classified.py --seed 44 --ModelMetric add_margin --batch_size 128 --gpu 0
+python train_classified.py --seed 44 --ModelMetric arc_margin --batch_size 128 --gpu 0
+python train_classified.py --seed 44 --ModelMetric sphere --batch_size 128 --gpu 0
+python train_classified.py --seed 44 --ModelMetric CurricularFace --lr 0.02 --batch_size 32 --gpu 0

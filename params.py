@@ -3,6 +3,8 @@
 import math
 import os
 from sys import flags
+
+from parso import parse
 import torch
 from torch.backends import cudnn
 import logging  # 引入logging模块
@@ -15,11 +17,13 @@ model_zoo = {
     'Effnet': 'efficientnet-b0',
     'Res18': 'Resnet18',
     'Res50': 'Resnet50',
+    'MobileNetV2m_arccenter': 'MobileNetV2m_arccenter',
 }
 #数据集名称
 dataset_zoo = {
-    'Un2020': 'Undergraduate_2020',
-    'SCUTV2': 'SCUT_PPPV_V2_PV',
+    'SCUTPVV1': 'SCUT_PV_V1',
+    'SCUTV2PV': 'SCUT_PPPV_V2_PV',
+    'SCUTV2PP': 'SCUT_PPPV_V2_PP',
     # 'TP': 'target_padding',
     'TJ': 'Tongji',
     'PolyMS': 'PolyU_MS',
@@ -35,9 +39,10 @@ datadir_zoo = {
     'TJPV': "/home/data/palm/Tongji_Contactless_Palmvein/ROI_outer",
     'TJPP': "/home/data/palm/Tongji_Contactless_Palmprint/ROI_outer",
     'PolyPP': "/home/data/palm/PolyU2011/PolyU_2011_palmprints_Database/Blue",
-    'PolyPV': "/home/data/palm/PolyU2011/PolyU_2011_palmprints_Database/NIR",
+    # 'PolyPV': "/home/data/palm/PolyU2011/PolyU_2011_palmprints_Database/NIR",
+    'PolyPV': '/home/qyt/new/PolyU/PolyU/NIR',
     'CASIA': "/home/data/palm/CASIA-Multi-Spectral-PalmprintV1/outer_roi",
-    'Un2020': "/home/data/palm/Undergraduate_2020/ROI_outer",
+    'SCUTPVV1': "/home/data/palm/SCUT_PV_V1/ROI_outer",
     'SCUTV2': '/home/data/palm/SCUT_PPPV_V2/roi_outer',
     'PUT': '/home/data/palm/PUT_Vein/VPBase_corrected/Palm',
     'vera': '/home/data/palm/idiap/idiap/vera-palmvein/VERA-Palmvein/roi',
@@ -49,7 +54,7 @@ def get_args():
     """
     parser = argparse.ArgumentParser(description='PyTorch Training Params')
     # 传入训练epochs数、metavar只用于help打印帮助信息时起占位符作用
-    parser.add_argument('--epochs', default=150, type=int, metavar='N',
+    parser.add_argument('--epochs', default=180, type=int, metavar='N',
                         help='number of total epochs to run')
     # 设置输入图片尺寸
     parser.add_argument('--img_size', default=(224,224),metavar='(a,b)',
@@ -92,16 +97,15 @@ def get_args():
     parser.add_argument('--warm_epochs', default=20, type=int,
                         metavar='warmup_epoch', help='Number of Warmup Epochs During Contrastive Training.')
     # 数据集路径
-    parser.add_argument('--data_dir', default=datadir_zoo['CASIA'], 
+    parser.add_argument('--data_dir', default=datadir_zoo['TJPV'], 
                         type=str, metavar='dir', help='the path of src files')
-    # parser.add_argument('--data_folder', default="/home/data/"+dataset_zoo['c10'], 
-    #                     type=str, metavar='dir', help='the path of src files')
-    # cos学习率衰减策略或指数衰减
-    parser.add_argument('--cos', default=True, type=bool,
-                        metavar='Ture', help='use cos learning rate')
     # 数据集名称
-    parser.add_argument('--dataset', default=dataset_zoo['CA_850'], type=str,
+    parser.add_argument('--dataset', default=dataset_zoo['TJ'], type=str,
                         metavar='name', help='the name of dataset')
+    
+    # cos学习率衰减策略或指数衰减
+    parser.add_argument('--cos', action="store_true", help='use cos learning rate')
+    
     # 是否使用数据扩增
     parser.add_argument('--aug', default=True, type=bool,
                         metavar='True/False', help='Use data augment or not.True or False')
@@ -114,6 +118,8 @@ def get_args():
     # 训练模型
     parser.add_argument('--model', default=model_zoo['Mobile2'], type=str,
                         metavar='model', help='choose a model')
+    parser.add_argument('--ModelMetric', default='', type=str,
+                        help='model fc layer')
     # SGD动量
     parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                         help='momentum')
@@ -127,8 +133,8 @@ def get_args():
     parser.add_argument('--blur_sigma', nargs=2, type=float, default=[0.1, 1.0],
                     help='Radius to Apply Random Colour Jitter Augmentation')
     # NCE loss的困难样本权重
-    parser.add_argument('--focal', action='store_true',
-                        help='set whether to use focal')
+    parser.add_argument('--focal', type=str, default='',
+                        help='choose to use which loss function')
     parser.add_argument('--gamma', default=0.5, type=float, metavar='gamma',
                         help='focal gamma')
     parser.add_argument('--keep_w', default=.1, type=float, metavar='keep_weight',

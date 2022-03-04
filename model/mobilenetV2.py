@@ -151,7 +151,7 @@ class MobileNet_v2(nn.Module):
     '''
     MobileNet v2网络
     '''
-    def __init__(self, num_classes=507, img_size=(256, 128), in_channel=3):
+    def __init__(self, args, num_classes=507, img_size=(256, 128), in_channel=3):
         '''
         构造函数
         num_classes: 总类别数
@@ -167,7 +167,7 @@ class MobileNet_v2(nn.Module):
         self.feature = None
         self.in_channel = in_channel
         latent_num = 512 #隐藏层特征维度
-        metric = ''
+        metric = args.ModelMetric
         self.metric = metric
         print(f'model metric: {metric}')
         # 选择度量方法

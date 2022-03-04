@@ -12,6 +12,12 @@ from torch.nn import Linear, Conv2d, BatchNorm1d, BatchNorm2d, PReLU, ReLU, Sigm
 import os
 import builtins
 
+def l2_norm(input, axis = 1):
+    norm = torch.norm(input, 2, axis, True)
+    output = torch.div(input, norm)
+
+    return output
+    
 class CurricularFace(nn.Module):
     def __init__(self, in_features, out_features, m = 0.5, s = 64.):
         super(CurricularFace, self).__init__()

@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # coding:utf-8
+from operator import mod
 import os
 # import sys
 import logging
@@ -17,17 +18,18 @@ import params
 import torch
 import torchvision.transforms as transforms
 import torch.optim.lr_scheduler as lr_scheduler
-# from torch.utils.tensorboard import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 # from efficientnet_pytorch import EfficientNet
 # -------------------------------
 import model.mobilenetV2 as mobilenetV2
 import model.attention_mobilenetV2 as attention_mobilenetV2
+# from model.mobilenetv2_m import MobileNetV2m_arccenter
 # from model.ResNet import ResNet18
 from data_process.datasets import FVDataset
 from data_process.getdata import getStat
 from loss.center_loss import CenterLoss
 from loss.NCE_Loss import NCE_Loss, NCE_Loss2
-from loss.CurricularNCE_loss import CurricularNCE_loss
+from loss.CurricularNCE_loss import CurricularNCE_loss,CurricularNCE_loss2
 from utils import AverageMeter, LOG
 from utils import ProgressMeter
 from utils import mkdir
@@ -55,7 +57,7 @@ def main():
     args = params.get_args()
     args.lr = args.lr * args.batch_size / 256 #simsiam的做法
     args.warmup_to = args.lr
-    time_now = time.strftime("%Y%m%d-%H%M", time.localtime())
+    time_now = time.strftime("%Y%m%d-%H%M%S", time.localtime())
     log_path =args.log_dir + '/'+ args.model + '_' + args.dataset + '_' + time_now + "_contrastive_lr" + str(args.lr) + "_batchsize" + str(args.batch_size)
     mkdir(log_path)
     logger = LOG(log_path)
@@ -67,6 +69,7 @@ def main():
     mkdir('./ckpt')
     mkdir(args.log_dir)
     logger.info('gamma :{} keep_wei:{} '.format(args.gamma, args.keep_w))
+    logger.info(f'学习率cos衰减 : {args.cos}'.center(40, '-'))
     # sys.stdout = Logger(os.path.join(log_path, 'log.txt'))
     # 指定使用的gpu
     
@@ -134,11 +137,14 @@ def main():
     
     # 训练使用的模型
     if args.model == 'mobilenetV2':
-        model = mobilenetV2.MobileNet_v2(num_classes=train_dataset.num_class, in_channel=1)
+        model = mobilenetV2.MobileNet_v2(args, num_classes=train_dataset.num_class, in_channel=1)
     elif args.model == 'attention_mobileNetV2':
         model = attention_mobilenetV2.TestNet()
     elif args.model == 'TestNet':
         model = mobilenetV2.TestNet()
+    elif args.model == 'MobileNetV2m_arccenter':
+        model = MobileNetV2m_arccenter(num_classes=train_dataset.num_class)
+    logger.info(f'model fc layer: {model.metric}'.center(40, '-'))
     '''
     # 指定使用的gpu
     if args.gpu is not None:
@@ -193,13 +199,16 @@ def main():
     # 定义损失函数
     criterion_ClassifyLoss = torch.nn.CrossEntropyLoss().cuda()
     # criterion_CenterLoss = CenterLoss(num_classes=int(train_dataset.num_class), feat_dim=512).cuda()
-    # if not args.focal:
-    #     criterion_NCELoss = NCE_Loss(T=0.1, mlp=False).cuda()
-    # else:
-    logger.info('----using Nce Focal-------')
-    criterion_NCELoss = NCE_Loss2(gamma=args.gamma, keep_weight=args.keep_w, T=0.1, mlp=False).cuda()
-    # logger.info('----using CurricularNCE_loss-------')
-    # criterion_NCELoss = CurricularNCE_loss(gamma=args.gamma, keep_weight=args.keep_w, T=0.1).cuda()
+    logger.info(f'----using loss func: {args.focal}-------')
+    if not args.focal:
+        # logger.info(f'----using loss func: {args.focal}-------')
+        criterion_NCELoss = NCE_Loss(T=0.1, mlp=False).cuda()
+    elif args.focal == 'focalNCE':
+        # logger.info(f'----using loss func: {args.focal}-------')
+        criterion_NCELoss = NCE_Loss2(gamma=args.gamma, keep_weight=args.keep_w, T=0.1, mlp=False).cuda()
+    elif args.focal == 'CurricularNCE':
+        # logger.info(f'----using loss func: {args.focal}-------')
+        criterion_NCELoss = CurricularNCE_loss2(gamma=args.gamma, keep_weight=args.keep_w, T=0.1).cuda()
     
     # 定义优化器
     # optimizer = torch.optim.SGD(model.parameters(), args.lr,
@@ -244,7 +253,7 @@ def main():
             print("=> no checkpoint found at '{}'".format(ckpt_path))
 
     # 构建tensorboard writer
-    # writer = SummaryWriter(log_dir=log_path)
+    writer = SummaryWriter(log_dir=log_path)
     # 开始迭代训练
     for epoch in range(args.start_epoch, args.epochs + 1):
         # 使sampler变换在多个epoch之间正常工作。否则，将始终使用相同的顺序。
@@ -254,9 +263,11 @@ def main():
         # 使用迭代器创建tqdm进度条
         tqdm_batch = tqdm(train_loader, desc='INFO:Mytqdm  :Training Epoch: ' + str(epoch).center(20, '-'))
         Nce_tracker = AverageMeter('NceLoss', ':.4e')
+        keew_w_tracker = AverageMeter('keew_w', ':.4e')
         # t_tracker = AverageMeter('Curricular_t', ':.4e')
         # center_tracker = AverageMeter('Center_Loss', ':.4e')
-        classify_tracker = AverageMeter('classify_loss', ':.4e')
+        # classify_tracker = AverageMeter('classify_loss', ':.4e')
+        # Loss_tracker = AverageMeter('Total Loss', ':.4e')
         # 根据epoch调整学习率
         if epoch > args.warm_epochs:
             adjust_learning_rate(optimizer, epoch, args)
@@ -275,11 +286,13 @@ def main():
 
             out1, feature1 = model(image1, label)
             out2, feature2 = model(image2, label)
+            # feature1, out1, _, _ = model(image1, label)
+            # feature2, out2, _, _ = model(image2, label)
             
-
-            loss1 = criterion_NCELoss(feature1, feature2, label)
-            # loss2 = loss = criterion_ClassifyLoss(out1, label)
-            loss = loss1# + loss2
+            loss = criterion_NCELoss(feature1, feature2, label)
+            # loss2 = 0.5*criterion_ClassifyLoss(out1, label) + 0.5*criterion_ClassifyLoss(out2, label)
+            # loss = loss1
+            # loss = loss1 + loss2
             # center_feature = torch.cat([feature1, feature2], dim=0)
             # center_label = torch.cat([label, label], dim=0)
             # center_loss = criterion_CenterLoss(center_feature, center_label)
@@ -291,23 +304,25 @@ def main():
             loss.backward()
             # torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
             optimizer.step()
-            Nce_tracker.update(loss1.item(), label.size(0))
+            Nce_tracker.update(loss.item(), 1)
+            # keew_w_tracker.update(keep_wS.item(), 1);
             # classify_tracker.update(loss2.item(), label.size(0))
-            # center_tracker.update(center_loss.item(), label.size(0))
-            # loss_tracker.update(loss.item(), label.size(0))
+            # center_tracker.update(LossCent1.item(), label.size(0))
+            # Loss_tracker.update(loss.item(), label.size(0))
 
         tqdm_batch.close()
-        # logger.info("-----Nces: ({:.6f})---center_losses: ({:.6f})----Loss: ({:.6f})-----"\
-        #              .format(Nce_tracker.avg, center_tracker.avg, loss_tracker.avg))
         logger.info("-----{}: ({:.6f})".format(Nce_tracker.name,Nce_tracker.avg))
+        # logger.info("-----{}: ({:.6f})".format(keew_w_tracker.name,keew_w_tracker.avg))
+        # logger.info("-----{}: ({:.6f})".format(Loss_tracker.name,Loss_tracker.avg))
         # logger.info(("-----{}: ({:.4f})".format(classify_tracker.name, classify_tracker.avg)))
-        # writer.add_scalar(f'{Nce_tracker.name}', Nce_tracker.avg, epoch)
-        # writer.add_scalar(f'{t_tracker.name}', t_tracker.avg, epoch)
-        # writer.add_scalar('center_loss', center_tracker.avg, epoch)
-        # writer.add_scalar('Loss', loss_tracker.avg, epoch)
-        # writer.add_scalar('Lr', optimizer.param_groups[0]['lr'], epoch)
+        writer.add_scalar(f'{Nce_tracker.name}', Nce_tracker.avg, epoch)
+        # writer.add_scalar(f'{keew_w_tracker.name}', keew_w_tracker.avg, epoch)
+        # writer.add_scalar(f'{classify_tracker.name}', classify_tracker.avg, epoch)
+        # writer.add_scalar(f'{center_tracker.name}', center_tracker.avg, epoch)
+        # writer.add_scalar(f'{Loss_tracker.name}', Loss_tracker.avg, epoch)
+        writer.add_scalar('Lr', optimizer.param_groups[0]['lr'], epoch)
         
-        logger.info('-------Lr:{:.8f}------'.format(optimizer.param_groups[0]['lr']))
+        logger.info('-------Lr:{:.6f}------'.format(optimizer.param_groups[0]['lr']))
 
         # 使用验证集测试
         if (30 < epoch < args.epochs - 40 and epoch % args.test_freq == 0) or (epoch >= args.epochs - 40 and epoch % 5 == 0): 
@@ -329,10 +344,10 @@ def main():
                     # image2 = image2.permute(0, 3, 1, 2)
 
                     label = label.cuda()
+                    # feature1, _, _, _ = model(image1, label)
+                    # feature2, _, _, _ = model(image2, label)
                     _, feature1 = model(image1, label)
                     _, feature2 = model(image2, label)
-                    # feature1 = model(image1)
-                    # feature2 = model(image2)
                     # feature1 = feature1.view(-1, 1280)
                     # feature2 = feature2.view(-1, 1280)
 
@@ -394,10 +409,10 @@ def main():
                         # image2 = image2.permute(0, 3, 1, 2)
 
                         label = label.cuda()
+                        # feature1, _, _, _ = model(image1, label)
+                        # feature2, _, _, _ = model(image2, label)
                         _, feature1 = model(image1, label)
                         _, feature2 = model(image2, label)
-                        # feature1 = model(image1)
-                        # feature2 = model(image2)
                         # feature1 = feature1.view(-1, 1280)
                         # feature2 = feature2.view(-1, 1280)
 

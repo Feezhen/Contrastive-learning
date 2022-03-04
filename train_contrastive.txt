@@ -1,0 +1,20 @@
+对比学习超参实验
+python train_contrastive.py --seed 44 --batch_size 16 --focal focalNCE --gamma 1 --keep_w 0 --gpu 1
+python train_contrastive.py --seed 44 --batch_size 32 --focal CurricularNCE --gamma 1 --keep_w 0 --gpu 1 --cos
+python train_contrastive.py --seed 44 --batch_size 64 --focal focalNCE --gamma 1 --keep_w 0 --gpu 0
+python train_contrastive.py --seed 44 --batch_size 128 --focal focalNCE --gamma 1 --keep_w 0 --gpu 2
+python train_contrastive.py --seed 44 --batch_size 32 --focal focalNCE --gamma 2 --keep_w 0 --gpu 0
+python train_contrastive.py --seed 44 --batch_size 64 --focal focalNCE --gamma 3 --keep_w 0 --gpu 0
+python train_contrastive.py --seed 44 --batch_size 64 --focal focalNCE --gamma 5 --keep_w 0 --gpu 0
+python train_contrastive.py --seed 44 --batch_size 64 --focal focalNCE --gamma 10 --keep_w 0 --gpu 1
+python train_contrastive.py --seed 44 --batch_size 64 --focal focalNCE --gamma 1 --keep_w 0.001 --gpu 1
+python train_contrastive.py --seed 44 --batch_size 64 --focal focalNCE --gamma 1 --keep_w 0.05 --gpu 2
+python train_contrastive.py --seed 44 --batch_size 64 --focal focalNCE --gamma 1 --keep_w 0.1 --gpu 3
+python train_contrastive.py --seed 44 --batch_size 64 --focal focalNCE --gamma 1 --keep_w 0.5 --gpu 3
+python train_contrastive.py --seed 44 --batch_size 64 --focal focalNCE --gamma 1 --keep_w 1 --gpu 4
+python train_contrastive.py --seed 44 --batch_size 64 --focal focalNCE --gamma 1 --keep_w 2 --gpu 4
+python train_contrastive.py --seed 44 --batch_size 64 --focal focalNCE --gamma 1 --keep_w 3 --gpu 0
+设置是否使用focal
+python train_contrastive.py --seed 44 --batch_size 32 --gpu 0
+设置学习率cos衰减
+python train_contrastive.py --seed 44 --batch_size 16 --focal focalNCE --gamma 1 --keep_w 0 --cos --gpu 0
